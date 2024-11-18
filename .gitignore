@@ -133,3 +133,12 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# Emoji data
+symbols.txt
+
+# CSpell
+.cspell
+
+# VS Code
+.vscode/
