@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Literal
 import numpy as np
 from numpy.typing import NDArray
 from scipy.integrate import solve_bvp
@@ -60,7 +60,29 @@ def schwarzschild_vol(
     rad / (rad - 2 * G * M * c ** 2)
   )
 
-def schwarzschild_chr(
+def schwarzschild_metric(
+  x : Coord,
+  M : float = 1,
+  G : float = 1,
+  c : float = 1,
+) -> NDArray:
+  '''Compute the metric tensor for the Schwarzschild metric.
+  '''
+  r, tht, phi = x
+  rs = 2 * G * M / c ** 2
+  
+  g_mn = np.zeros((3, 3, *r.shape))
+  
+  # Compute the metric tensor for the Schwarzschild metric
+  g_mn[0, 0] = 1 / (1 - rs / r)
+  g_mn[1, 1] = r ** 2
+  g_mn[2, 2] = r ** 2 * np.sin(tht) ** 2
+  
+  assert np.isfinite(g_mn).all(), 'Invalid metric tensor'
+  
+  return g_mn
+
+def schwarzschild_christoffel(
   x : Coord,
   M : float = 1,
   G : float = 1,
@@ -80,17 +102,25 @@ def schwarzschild_chr(
   
   gamma[1, 0, 1] = gamma[2, 0, 2] = 1 / r
   gamma[1, 2, 2] = -np.cos(tht) * np.sin(tht)
-  gamma[2, 1, 2] = 1 / np.tan(tht)
+  gamma[2, 1, 2] = 1 / (np.tan(tht) + 1e-10)
   
   assert np.isfinite(gamma).all(), 'Invalid Christoffel symbol'
   
   return gamma
+
+METRIC = {
+  'schwarzschild': {
+    'metric'     : schwarzschild_metric,
+    'christoffel': schwarzschild_christoffel,
+  },
+}
 
 def geodesic(
   A : Coord,
   B : Coord,
   christoffel : Callable[[Coord], NDArray],
   res : int = 100,
+  **kwargs,
 ) -> OptimizeResult:
   '''
   Solve the geodesic equation for a given metric tensor
@@ -104,25 +134,24 @@ def geodesic(
   We express the geodesic equation as a system of first-order ODEs
   and solve it using a numerical method (scipy.integrate.bvp).
   
-  x'^i = y^i
-  y'^i = -Γ^i_jk y^j y^k
+  The system of ODEs is:
+  { y1^i = x^i           ==>   { y1'^i = y2^i
+  { y2^i = x'^i = dx/dl  ==>   { y2'^i = -Γ^i_jk y2^j y2^k
   '''
   A = np.asarray(A)
   B = np.asarray(B)
   
   def geo(_ : Coord, y : Coord):
-    x, y = y[:3], y[3:]
+    y1, y2 = y[:3], y[3:]
     
-    out = np.stack([
-      *x,
+    return np.stack([
+      *y2,
       *einsum(
-        -christoffel(x),
-        y, y,
+        -christoffel(y1),
+        y2, y2,
         'i j k t, j t, k t -> i t',
       )
     ])
-    assert np.isfinite(out).all(), 'Invalid geodesic'
-    return out
   
   def bc(ya : NDArray, yb : NDArray):
     return np.concatenate([
@@ -143,5 +172,40 @@ def geodesic(
   return solve_bvp(
     geo, bc,
     t, guess,
-    verbose=2,
+    **kwargs,
+  )
+
+def distance(
+  A : Coord,
+  B : Coord,
+  metric : Literal['schwarzschild'] = 'schwarzschild',
+  res : int = 100,
+  **kwargs,
+) -> float:
+  '''Compute the distance between two points A and B
+  along a geodesic path.
+  '''
+  A = np.asarray(A)
+  B = np.asarray(B)
+  
+  metric_tens = METRIC[metric]['metric']
+  christoffel = METRIC[metric]['christoffel']
+  
+  geo = geodesic(A, B, christoffel, res, **kwargs)
+  
+  if not geo.success:
+    raise ValueError(f'Geodesic solver failed. {geo}')
+  
+  y, dydx = geo.y[:A.size], geo.y[A.size:]
+  
+  return np.trapz(
+    np.sqrt(
+      # g_ij dx^i dx^j
+      einsum(
+        metric_tens(y),
+        dydx, dydx,
+        'i j t, i t, j t -> t',
+      )
+    ),
+    geo.x,
   )

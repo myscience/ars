@@ -15,7 +15,7 @@ def poisson(
   size : int | None = 100,
   imap : Callable[[Coord], Coord] = None,
 ) -> NDArray:
-  imap = imap or (lambda x: x)
+  imap = imap or (lambda *args: np.asarray(args))
   
   # * Compute the number of points to generate in the domain
   # * according to the poisson distribution
