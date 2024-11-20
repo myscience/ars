@@ -1,4 +1,4 @@
-from typing import Callable, Literal
+from typing import Callable, List, Literal
 import numpy as np
 from numpy.typing import NDArray
 from scipy.integrate import solve_bvp
@@ -6,39 +6,9 @@ from scipy.optimize import OptimizeResult
 
 from einops import einsum
 
+from src.utils import blerp, hlerp, slerp
+
 Coord = NDArray
-
-def cart2pol(*args):
-  match len(args):
-    case 2:
-      x, y = args
-      rho = np.sqrt(x**2 + y**2)
-      phi = np.arctan2(y, x)
-      return np.stack((rho, phi))
-    case 3:
-      x, y, z = args
-      rho = np.sqrt(x**2 + y**2 + z**2)
-      theta = np.arccos(z / rho)
-      phi = np.arctan2(y, x)
-      return np.stack((rho, theta, phi))
-    case _:
-      raise ValueError('Invalid number of arguments')
-
-def pol2cart(*args):
-  match len(args):
-    case 2:
-      rho, phi = args
-      x = rho * np.cos(phi)
-      y = rho * np.sin(phi)
-      return np.stack((x, y))
-    case 3:
-      rho, theta, phi = args
-      x = rho * np.sin(theta) * np.cos(phi)
-      y = rho * np.sin(theta) * np.sin(phi)
-      z = rho * np.cos(theta)
-      return np.stack((x, y, z))
-    case _:
-      raise ValueError('Invalid number of arguments')
 
 def schwarzschild_psi(
   r : NDArray,
@@ -78,7 +48,8 @@ def schwarzschild_metric(
   g_mn[1, 1] = r ** 2
   g_mn[2, 2] = r ** 2 * np.sin(tht) ** 2
   
-  assert np.isfinite(g_mn).all(), 'Invalid metric tensor'
+  if not np.isfinite(g_mn).all():
+    raise ValueError('Invalid metric tensor')
   
   return g_mn
 
@@ -104,7 +75,8 @@ def schwarzschild_christoffel(
   gamma[1, 2, 2] = -np.cos(tht) * np.sin(tht)
   gamma[2, 1, 2] = 1 / (np.tan(tht) + 1e-10)
   
-  assert np.isfinite(gamma).all(), 'Invalid Christoffel symbol'
+  if not np.isfinite(gamma).all():
+    raise ValueError(f'Invalid Christoffel symbol. {r}, {tht}, {phi}')
   
   return gamma
 
@@ -118,8 +90,11 @@ METRIC = {
 def geodesic(
   A : Coord,
   B : Coord,
-  christoffel : Callable[[Coord], NDArray],
-  res : int = 100,
+  chris : Callable[[Coord], NDArray],
+  guess : NDArray | None = None,
+  f_ini : Callable[[Coord], NDArray] | None = None,
+  f_fix : Callable[[NDArray], NDArray] | None = None,
+  num_p : int = 50,
   **kwargs,
 ) -> OptimizeResult:
   '''
@@ -141,13 +116,18 @@ def geodesic(
   A = np.asarray(A)
   B = np.asarray(B)
   
+  f_fix = f_fix or (lambda *args: np.asarray(*args))
+  
   def geo(_ : Coord, y : Coord):
+    # Impose hard-constraints
+    y = f_fix(y)
+    
     y1, y2 = y[:3], y[3:]
     
     return np.stack([
       *y2,
       *einsum(
-        -christoffel(y1),
+        -chris(y1),
         y2, y2,
         'i j k t, j t, k t -> i t',
       )
@@ -161,11 +141,12 @@ def geodesic(
   
   # This is the geodesic parametrization parameter
   # i.e. ɣ : [0, 1] -> [A, B]
-  t = np.linspace(0, 1, res)
+  t = np.linspace(0, 1, num_p)
 
   # Set up a linear initial guess
-  guess = np.stack([
-    *(line := np.linspace(A, B, res).T),
+  f_ini = f_ini or (lambda a, b, r: np.linspace(a, b, r).T)
+  guess = guess or np.stack([
+    *(line := f_ini(A, B, num_p)),
     *[np.gradient(l, t) for l in line]
   ])
   
@@ -179,6 +160,7 @@ def distance(
   A : Coord,
   B : Coord,
   metric : Literal['schwarzschild'] = 'schwarzschild',
+  init_fn : List[Callable[[Coord], NDArray]] | None = None,
   res : int = 100,
   **kwargs,
 ) -> float:
@@ -191,12 +173,24 @@ def distance(
   metric_tens = METRIC[metric]['metric']
   christoffel = METRIC[metric]['christoffel']
   
-  geo = geodesic(A, B, christoffel, res, **kwargs)
+  init_fn = init_fn or [slerp, hlerp, blerp, None]
+  if not isinstance(init_fn, list): init_fn = [init_fn]
+  
+  for f_ini in init_fn:
+    try:
+      geo = geodesic(A, B, christoffel, f_ini=f_ini, **kwargs)
+      if not geo.success: raise ValueError('Failed.')
+      break
+    except ValueError:
+      print(f'{f_ini} failed. Retrying...')
+      continue
   
   if not geo.success:
-    raise ValueError(f'Geodesic solver failed. {geo}')
+    raise ValueError(f'Geodesic solver failed.\n{geo}')
   
-  y, dydx = geo.y[:A.size], geo.y[A.size:]
+  t = np.linspace(0, 1, res)
+  Y = geo.sol(t)
+  y, dydx = Y[:A.size], Y[A.size:]
   
   return np.trapz(
     np.sqrt(
@@ -207,5 +201,5 @@ def distance(
         'i j t, i t, j t -> t',
       )
     ),
-    geo.x,
-  )
+    t,
+  ), geo
