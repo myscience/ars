@@ -1,7 +1,15 @@
-from typing import Callable, Tuple
+import logging
 import numpy as np
+from typing import Callable, Tuple
 
 from numpy.typing import NDArray
+
+from ars.log import setup_logging
+
+setup_logging()
+
+# Create a logger for the ephys.io module
+logger = logging.getLogger(__name__)  # __name__ will be 'ephys.core'
 
 Domain = Tuple[Tuple[float, float], ...]
 Coord = Tuple[NDArray, ...]

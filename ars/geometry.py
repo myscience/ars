@@ -1,12 +1,22 @@
-from typing import Callable, List, Literal
+import logging
 import numpy as np
+from functools import partial
+from itertools import product
+from typing import Callable, List, Literal
 from numpy.typing import NDArray
 from scipy.integrate import solve_bvp
 from scipy.optimize import OptimizeResult
 
 from einops import einsum
 
-from src.utils import blerp, hlerp, slerp
+from ars.utils import blerp, hlerp, slerp
+
+from ars.log import setup_logging
+
+setup_logging()
+
+# Create a logger for the ephys.io module
+logger = logging.getLogger(__name__)  # __name__ will be 'ephys.core'
 
 Coord = NDArray
 
@@ -150,6 +160,8 @@ def geodesic(
     *[np.gradient(l, t) for l in line]
   ])
   
+  name = f_ini.__name__ if hasattr(f_ini, '__name__') else f'{f_ini}'
+  logging.debug(f'Solver BVP Problem with {name} and {num_p}')
   return solve_bvp(
     geo, bc,
     t, guess,
@@ -173,20 +185,25 @@ def distance(
   metric_tens = METRIC[metric]['metric']
   christoffel = METRIC[metric]['christoffel']
   
-  init_fn = init_fn or [slerp, hlerp, blerp, None]
-  if not isinstance(init_fn, list): init_fn = [init_fn]
+  num_ps = kwargs.pop('num_p', [50, 25, 10, 5])
+  init_fn = init_fn or [slerp, partial(slerp, dir=-1), hlerp, blerp, None]
   
-  for f_ini in init_fn:
+  if not isinstance(init_fn, list): init_fn = [init_fn]
+  if not isinstance(num_ps, list): num_ps = [num_ps]
+  
+  
+  for f_ini, num_p in product(init_fn, num_ps):
     try:
-      geo = geodesic(A, B, christoffel, f_ini=f_ini, **kwargs)
-      if not geo.success: raise ValueError('Failed.')
+      geo = geodesic(A, B, christoffel, f_ini=f_ini, num_p=num_p, **kwargs)
+      if not geo.success: raise ValueError(f':(')
       break
-    except ValueError:
-      print(f'{f_ini} failed. Retrying...')
+    except ValueError as err:
+      logging.info(f'Geodesic BVP Solver failed 🙁. Retrying...')
       continue
   
   if not geo.success:
-    raise ValueError(f'Geodesic solver failed.\n{geo}')
+    logging.exception(f'All Geodesic Solver failed. Stop trying.')
+    raise ValueError(f'All initializations failed ☠️. Geodesic solver failed.\n{geo}')
   
   t = np.linspace(0, 1, res)
   Y = geo.sol(t)
@@ -202,4 +219,4 @@ def distance(
       )
     ),
     t,
-  ), geo
+  )

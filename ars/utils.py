@@ -1,6 +1,15 @@
-from typing import Tuple
+import logging
 import numpy as np
+from typing import Tuple
 from numpy.typing import NDArray
+
+from ars.log import setup_logging
+
+setup_logging()
+
+# Create a logger for the ephys.io module
+logger = logging.getLogger(__name__)  # __name__ will be 'ephys.core'
+
 
 Coord = NDArray
 
@@ -36,8 +45,13 @@ def pol2cart(*args):
     case _:
       raise ValueError('Invalid number of arguments')
 
-def fix_azimuth(p1 : Coord, p2 : Coord, res : int) -> NDArray:
-  sign = -1 if p2 - p1 > np.pi else +1
+def fix_azimuth(
+  p1 : Coord,
+  p2 : Coord,
+  res : int,
+  dir : int = +1,
+) -> NDArray:
+  sign = -1 if dir * (p2 - p1) > dir * np.pi else +1
   phi = np.linspace(p1, p2 + sign * 2 * np.pi if abs(p2 - p1) > np.pi else p2, res)
 
   return phi
@@ -46,6 +60,7 @@ def slerp(
   A : NDArray | Tuple[float, float, float],
   B : NDArray | Tuple[float, float, float],
   res : int = 100,
+  dir : int = +1,
 ) -> NDArray:
     """
     Linear interpolation between two points in spherical coordinates.
@@ -71,7 +86,7 @@ def slerp(
     # p = np.linspace(p1, p2 + sign * 2 * np.pi if abs(p2 - p1) > np.pi else p2, res)
 
     # Handle cyclic interpolation for phi
-    p = fix_azimuth(p1, p2, res)
+    p = fix_azimuth(p1, p2, res, dir)
 
     return np.array([r, t, p])
 
