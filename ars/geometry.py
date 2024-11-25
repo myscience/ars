@@ -15,40 +15,40 @@ from ars.log import setup_logging
 
 setup_logging()
 
-# Create a logger for the ephys.io module
-logger = logging.getLogger(__name__)  # __name__ will be 'ephys.core'
+# Create a logger for the ars.geometry module
+logger = logging.getLogger(__name__)  # __name__ will be 'ars.geometry'
 
 Coord = NDArray
 
 def schwarzschild_psi(
-  r : NDArray,
+  pos : Coord,
   M : float = 1,
   G : float = 1,
   c : float = 1,
 ) -> NDArray:
+  r, t, p = pos
   return np.sqrt(r / (r - 2 * G * M * c ** 2))
 
 def schwarzschild_vol(
-  rad : NDArray,
-  tht : NDArray,
-  phi : NDArray,
+  pos : Coord,
   M : float = 1,
   G : float = 1,
   c : float = 1,
 ) -> NDArray:
-  return rad * rad * np.sin(tht) * np.sqrt(
-    rad / (rad - 2 * G * M * c ** 2)
+  r, t, p = pos
+  return r * r * np.sin(t) * np.sqrt(
+    r / (r - 2 * G * M * c ** 2)
   )
 
 def schwarzschild_metric(
-  x : Coord,
+  pos : Coord,
   M : float = 1,
   G : float = 1,
   c : float = 1,
 ) -> NDArray:
   '''Compute the metric tensor for the Schwarzschild metric.
   '''
-  r, tht, phi = x
+  r, t, p = pos
   rs = 2 * G * M / c ** 2
   
   g_mn = np.zeros((3, 3, *r.shape))
@@ -56,7 +56,7 @@ def schwarzschild_metric(
   # Compute the metric tensor for the Schwarzschild metric
   g_mn[0, 0] = 1 / (1 - rs / r)
   g_mn[1, 1] = r ** 2
-  g_mn[2, 2] = r ** 2 * np.sin(tht) ** 2
+  g_mn[2, 2] = r ** 2 * np.sin(t) ** 2
   
   if not np.isfinite(g_mn).all():
     raise ValueError('Invalid metric tensor')
@@ -64,14 +64,14 @@ def schwarzschild_metric(
   return g_mn
 
 def schwarzschild_christoffel(
-  x : Coord,
+  pos : Coord,
   M : float = 1,
   G : float = 1,
   c : float = 1,
 ) -> NDArray:
   '''Compute the Christoffel symbol for the Schwarzschild metric.
   '''
-  r, tht, phi = x
+  r, tht, phi = pos
   rs = 2 * G * M / c ** 2
   
   gamma = np.zeros((3, 3, 3, *r.shape))
@@ -89,6 +89,45 @@ def schwarzschild_christoffel(
     raise ValueError(f'Invalid Christoffel symbol. {r}, {tht}, {phi}')
   
   return gamma
+
+def brill_lindquist_binary_bh(
+  pos : Coord,
+  M_1 : float = 1,
+  M_2 : float = 1,
+  z_0 : float = 2,
+) -> NDArray:
+  r, t, p = pos
+  
+  g_mn = np.zeros((3, 3, *r.shape))
+  
+  PHI = 1 + .5 * (
+    M_1 / np.sqrt(r ** 2 * np.sin(t) ** 2 + (r * np.cos(t) - z_0) ** 2) +
+    M_2 / np.sqrt(r ** 2 + np.sin(t) ** 2 + (r * np.cos(t) + z_0) ** 2)
+  )
+  
+  g_mn[0, 0] = PHI ** 4
+  g_mn[1, 1] = PHI ** 4 * r ** 2
+  g_mn[2, 2] = PHI ** 4 * r ** 2 * np.sin(t) ** 2
+  
+  if not np.isfinite(g_mn).all():
+    raise ValueError('Invalid metric tensor')
+  
+  return g_mn
+
+def brill_lindquist_binary_bh_vol(
+  pos : Coord,
+  M_1 : float = 1,
+  M_2 : float = 1,
+  z_0 : float = 2,
+) -> NDArray:
+  r, t, p = pos
+  
+  PHI = 1 + .5 * (
+    M_1 / np.sqrt(r ** 2 * np.sin(t) ** 2 + (r * np.cos(t) - z_0) ** 2) +
+    M_2 / np.sqrt(r ** 2 + np.sin(t) ** 2 + (r * np.cos(t) + z_0) ** 2)
+  )
+  
+  return r * r * np.sin(t) * PHI ** 2
 
 METRIC = {
   'schwarzschild': {
@@ -174,6 +213,7 @@ def distance(
   metric : Literal['schwarzschild'] = 'schwarzschild',
   init_fn : List[Callable[[Coord], NDArray]] | None = None,
   res : int = 100,
+  desist : Callable[[Coord, Coord], bool] | None = None,
   **kwargs,
 ) -> float:
   '''Compute the distance between two points A and B
@@ -181,6 +221,9 @@ def distance(
   '''
   A = np.asarray(A)
   B = np.asarray(B)
+  
+  desist = desist or (lambda a, b: False)
+  if desist(A, B): return np.inf
   
   metric_tens = METRIC[metric]['metric']
   christoffel = METRIC[metric]['christoffel']

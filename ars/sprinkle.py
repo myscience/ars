@@ -8,8 +8,8 @@ from ars.log import setup_logging
 
 setup_logging()
 
-# Create a logger for the ephys.io module
-logger = logging.getLogger(__name__)  # __name__ will be 'ephys.core'
+# Create a logger for the ars.sprinkle module
+logger = logging.getLogger(__name__)  # __name__ will be 'ars.sprinkle'
 
 Domain = Tuple[Tuple[float, float], ...]
 Coord = Tuple[NDArray, ...]
@@ -32,12 +32,12 @@ def poisson(
   l_star = max_metric or np.max(
     M := metric(
       # Domain coordinates
-      *np.meshgrid(*[
+      np.meshgrid(*[
         np.linspace(a, b, resolution)
         for a, b in domain
       ])
     )
-  ) * 1.1
+  )
   
   # Generate a random number of points
   # according to the poisson distribution
@@ -48,17 +48,19 @@ def poisson(
   P = np.stack([
     # Sample more points than needed so to
     # leave room for rejection sampling
-    np.random.uniform(a, b, 5 * num)
+    np.random.uniform(a, b, 50 * num)
     for a, b in domain
   ], axis=-1)
-  
-  # Compute the intensity at each point
-  I : np.ndarray = metric(*P.T)
   
   # Implement rejection sampling by discarding points
   # according to the thinning strategy
   n, d = P.shape
   while n > size:
+    # ! CHECK THIS CODE
+    # Compute the intensity at each point
+    I : np.ndarray = metric(P.T)
+    print(l_star, I.mean(), I.max())  
+    
     mask = np.random.uniform(0, 1, size=n) < I / l_star
     idxs = tuple(idx[:size] for idx in np.nonzero(mask))
     P = P[idxs]

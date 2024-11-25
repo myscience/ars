@@ -13,8 +13,8 @@ from ars.log import setup_logging
 
 setup_logging()
 
-# Create a logger for the ephys.io module
-logger = logging.getLogger(__name__)  # __name__ will be 'ephys.core'
+# Create a logger for the ars.core module
+logger = logging.getLogger(__name__)  # __name__ will be 'ars.core'
 
 # Load the symbols from a file
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -7,8 +7,8 @@ from ars.log import setup_logging
 
 setup_logging()
 
-# Create a logger for the ephys.io module
-logger = logging.getLogger(__name__)  # __name__ will be 'ephys.core'
+# Create a logger for the ars.utils module
+logger = logging.getLogger(__name__)  # __name__ will be 'ars.utils'
 
 
 Coord = NDArray
